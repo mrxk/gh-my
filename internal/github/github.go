@@ -232,6 +232,7 @@ func (c *Client) fetchAllPRs() {
 
 func (c *Client) executeQuery(query string) result.Result[PullRequestSearchResults] {
 	cmd := exec.CommandContext(c.ctx, "gh", "api", "graphql", "-f", fmt.Sprintf("query=%s", query))
+	cmd.Env = getGHEnviron()
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return result.Error[PullRequestSearchResults](fmt.Errorf("%s: %w", output, err))
@@ -288,6 +289,18 @@ func getConfigPath() result.Result[string] {
 	}
 	homeDir := result.New(os.UserHomeDir())
 	return result.MapNoError(configPathFromHomeDir, homeDir)
+}
+
+func getGHEnviron() []string {
+	env := os.Environ()
+	for i := range env {
+		if strings.HasPrefix(env[i], "GH_NO_UPDATE_NOTIFIER=") {
+			env[i] = "GH_NO_UPDATE_NOTIFIER=1"
+			return env
+		}
+	}
+	env = append(env, "GH_NO_UPDATE_NOTIFIER=1")
+	return env
 }
 
 func configPathFromHomeDir(d string) string {

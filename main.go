@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
@@ -19,8 +20,9 @@ Usage:
 	my [(prs|requests|all)] [options]
 
 Options:
-	-d, --include-drafts  Include draft PRs
-	-c, --include-closed  Include closed PRs
+	-d, --include-drafts               Include draft PRs.
+	-c, --include-closed               Include closed PRs.
+	-w <interval>, --watch=<interval>  Poll every <interval>.
 	`
 )
 
@@ -28,6 +30,7 @@ type Options struct {
 	startTab      model.TabIndex
 	includeClosed bool
 	includeDrafts bool
+	watch         time.Duration
 }
 
 func parseArgs(usage string) (Options, error) {
@@ -38,6 +41,14 @@ func parseArgs(usage string) (Options, error) {
 	}
 	opts.includeDrafts, _ = docOpts.Bool("--include-drafts")
 	opts.includeClosed, _ = docOpts.Bool("--include-closed")
+	watch, _ := docOpts.String("--watch")
+	if watch != "" {
+		duration, err := time.ParseDuration(watch)
+		if err != nil {
+			return opts, err
+		}
+		opts.watch = duration
+	}
 	prs, _ := docOpts.Bool("prs")
 	requests, _ := docOpts.Bool("requests")
 	all, _ := docOpts.Bool("all")
@@ -57,10 +68,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	var ticker *time.Ticker
+	if opts.watch != 0 {
+		ticker = time.NewTicker(opts.watch)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	client := github.New(&github.Options{
 		Ctx:           ctx,
-		Ticker:        nil,
+		Ticker:        ticker,
 		IncludeDrafts: opts.includeDrafts,
 		IncludeClosed: opts.includeClosed,
 	})
