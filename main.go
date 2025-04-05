@@ -73,12 +73,16 @@ func main() {
 		ticker = time.NewTicker(opts.watch)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	client := github.New(&github.Options{
+	client, err := github.New(&github.Options{
 		Ctx:           ctx,
 		Ticker:        ticker,
 		IncludeDrafts: opts.includeDrafts,
 		IncludeClosed: opts.includeClosed,
 	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
 	client.Run()
 	p := tea.NewProgram(model.New(model.Options{
 		Context:       ctx,

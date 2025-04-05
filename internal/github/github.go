@@ -119,7 +119,7 @@ type Options struct {
 	IncludeClosed bool
 }
 
-func New(config *Options) *Client {
+func New(config *Options) (*Client, error) {
 	data := make(chan SearchResults)
 	commands := make(chan Command)
 	c := &Client{
@@ -129,14 +129,16 @@ func New(config *Options) *Client {
 		commands: commands,
 	}
 	// Load defaults from file
-	_ = c.loadConfig()
-
+	err := c.loadConfig()
+	if err != nil {
+		return nil, err
+	}
 	// Override with explicit args
 	c.ctx = config.Ctx
 	c.ticker = config.Ticker
 	c.includeDrafts = config.IncludeDrafts
 	c.includeClosed = config.IncludeClosed
-	return c
+	return c, nil
 }
 
 func (c *Client) Run() {
