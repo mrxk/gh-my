@@ -2,8 +2,10 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,6 +46,7 @@ type Model struct {
 	error         string
 	includeClosed bool
 	includeDrafts bool
+	prListUpdated time.Time
 }
 
 type Options struct {
@@ -145,25 +148,19 @@ func (m *Model) activateTab(idx TabIndex) tea.Cmd {
 func (m *Model) View() string {
 	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true, false, true, false).BorderForeground(lipgloss.Color("#6CB0D2"))
 	var tableView string
-	var footer string
+	var footerStatus string
 	switch m.selectedTab {
 	case MyPRsTab:
 		tableView = m.myPRs.View()
-		footer = m.myPRs.Status()
+		footerStatus = m.myPRs.Status()
 	case MyRequestsTab:
 		tableView = m.myRequests.View()
-		footer = m.myRequests.Status()
+		footerStatus = m.myRequests.Status()
 	case AllPRsTab:
 		tableView = m.allPRs.View()
-		footer = m.allPRs.Status()
+		footerStatus = m.allPRs.Status()
 	}
-	if m.includeClosed {
-		footer += " [including closed]"
-	}
-	if m.includeDrafts {
-		footer += " [including drafts]"
-	}
-	footer += " " + m.error
+	footer := m.footerView(footerStatus)
 	return strings.Join(
 		[]string{
 			lipgloss.JoinVertical(lipgloss.Top,
@@ -174,6 +171,21 @@ func (m *Model) View() string {
 				footer,
 			),
 		}, "\n")
+}
+
+func (m *Model) footerView(status string) string {
+	footer := status
+	if m.includeClosed {
+		footer += " [including closed]"
+	}
+	if m.includeDrafts {
+		footer += " [including drafts]"
+	}
+	footer += " " + m.error
+	timeFooter := m.prListUpdated.Format("03:04:05 PM")
+	infoWidth := m.myPRs.Width() - len(timeFooter)
+	footerFormat := fmt.Sprintf("%%-%ds%%s", infoWidth)
+	return fmt.Sprintf(footerFormat, footer, timeFooter)
 }
 
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
@@ -213,6 +225,7 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 
 func (m *Model) handleSearchResults(msg SearchResultsMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	m.prListUpdated = time.Now()
 	m.error = "" // clear any error
 	switch typedResults := msg.SearchResults.(type) {
 	case *github.MyPRs:
