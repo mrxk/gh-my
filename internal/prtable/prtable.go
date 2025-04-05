@@ -218,7 +218,7 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 	for _, issue := range t.prs.Data.Search.Edges {
 		row := []string{
 			checkEmoji(issue.Node.StatusCheckRollup.State),
-			mergeableEmoji(issue.Node.Mergeable),
+			mergeableEmoji(issue.Node.Mergeable, issue.Node.MergeStateStatus),
 			reviewEmoji(issue.Node.ReviewDecision),
 			issue.Node.Title,
 			issue.Node.URL,
@@ -306,11 +306,14 @@ func draftEmoji(value bool) string {
 
 }
 
-func mergeableEmoji(value string) string {
-	switch value {
+func mergeableEmoji(mergeable, status string) string {
+	switch mergeable {
 	case "CONFLICTING":
 		return "❌"
 	case "MERGEABLE":
+		if status == "BEHIND" {
+			return "⬆️"
+		}
 		return "✅"
 	default:
 		return " "

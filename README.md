@@ -92,11 +92,16 @@ optional).
 
 By default the following columns are displayed.
 
-* `C`: If all checks have passed the value in this column will be ✅. If any
-  check has failed, it will be ❌. If checks are running, it will be ⏳.
-* `M`: If the PR is mergable, the value in this column will be ✅. If the PR has
-  a conflict, the value will be ❌.
-* `A`: If the PR has been approved, the value in this column will be ✅.
+* `C`: The PR checks status.
+  * ✅: All checks have passed.
+  * ❌: One or more checks have failed.
+  * ⏳: Checks are running.
+* `M`: The PR mergeability status.
+  * ✅: The PR can be merged cleanly.
+  * ❌: The PR is conflicting.
+  * ⬆️: The PR is behind.
+* `A`: The PR approval status.
+  * ✅: The PR is approved.
 * `Title`: The title of the PR.
 * `Author`: The author of the PR.
 * `Repository`: The repository name with the organization stripped.

@@ -38,6 +38,7 @@ type PullRequestSearchResults struct {
 					Title              string `json:"title"`
 					URL                string `json:"url"`
 					Mergeable          string `json:"mergeable"`
+					MergeStateStatus   string `json:"mergeStateStatus"`
 					IsDraft            bool   `json:"isDraft"`
 					State              string `json:"state"`
 					UpdatedAt          string `json:"updatedAt"`
@@ -194,6 +195,7 @@ const template = `
 		    login
 		  }
 		  mergeable
+		  mergeStateStatus
 		  isDraft
 		  state
 		  updatedAt
