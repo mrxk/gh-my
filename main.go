@@ -30,7 +30,7 @@ type Options struct {
 	startTab      model.TabIndex
 	includeClosed bool
 	includeDrafts bool
-	watch         time.Duration
+	interval      time.Duration
 }
 
 func parseArgs(usage string) (Options, error) {
@@ -41,13 +41,13 @@ func parseArgs(usage string) (Options, error) {
 	}
 	opts.includeDrafts, _ = docOpts.Bool("--include-drafts")
 	opts.includeClosed, _ = docOpts.Bool("--include-closed")
-	watch, _ := docOpts.String("--watch")
-	if watch != "" {
-		duration, err := time.ParseDuration(watch)
+	interval, _ := docOpts.String("--watch")
+	if interval != "" {
+		duration, err := time.ParseDuration(interval)
 		if err != nil {
 			return opts, err
 		}
-		opts.watch = duration
+		opts.interval = duration
 	}
 	prs, _ := docOpts.Bool("prs")
 	requests, _ := docOpts.Bool("requests")
@@ -69,8 +69,8 @@ func main() {
 		panic(err)
 	}
 	var ticker *time.Ticker
-	if opts.watch != 0 {
-		ticker = time.NewTicker(opts.watch)
+	if opts.interval != 0 {
+		ticker = time.NewTicker(opts.interval)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	client, err := github.New(&github.Options{
@@ -89,6 +89,7 @@ func main() {
 		Commands:      client.Commands,
 		IncludeClosed: opts.includeClosed,
 		IncludeDrafts: opts.includeDrafts,
+		Interval:      opts.interval,
 		StartTab:      opts.startTab,
 	}), tea.WithAltScreen())
 	go pump(client, p)

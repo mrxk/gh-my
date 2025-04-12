@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sassoftware/sas-ggdk/pkg/jsonutils"
 	"github.com/sassoftware/sas-ggdk/pkg/result"
 	"github.com/sassoftware/sas-ggdk/pkg/sliceutils"
 )
@@ -275,7 +276,7 @@ func (c *Client) loadConfig() error {
 		Repositories  []string
 	}
 	configPath := getConfigPath()
-	configResult := result.FlatMap(load[configuration], configPath)
+	configResult := result.FlatMap(jsonutils.LoadAs[configuration], configPath)
 	if configResult.IsError() {
 		return configResult.Error()
 	}
@@ -314,15 +315,4 @@ func configPathFromHomeDir(d string) string {
 
 func configPathFromConfigRoot(d string) string {
 	return path.Join(d, "gh-my", "config.json")
-}
-
-func load[T any](path string) result.Result[T] {
-	content := result.New(os.ReadFile(path))
-	return result.FlatMap(unmarshal[T], content)
-}
-
-func unmarshal[T any](content []byte) result.Result[T] {
-	var t T
-	err := json.Unmarshal(content, &t)
-	return result.New(t, err)
 }

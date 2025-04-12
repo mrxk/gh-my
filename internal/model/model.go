@@ -47,6 +47,7 @@ type Model struct {
 	includeClosed bool
 	includeDrafts bool
 	prListUpdated time.Time
+	interval      time.Duration
 }
 
 type Options struct {
@@ -55,6 +56,7 @@ type Options struct {
 	IncludeClosed bool
 	IncludeDrafts bool
 	StartTab      TabIndex
+	Interval      time.Duration
 }
 
 func New(opts Options) *Model {
@@ -70,6 +72,7 @@ func New(opts Options) *Model {
 	m.includeClosed = opts.IncludeClosed
 	m.includeDrafts = opts.IncludeDrafts
 	m.selectedTab = opts.StartTab
+	m.interval = opts.Interval
 	return m
 }
 
@@ -183,6 +186,9 @@ func (m *Model) footerView(status string) string {
 	}
 	footer += " " + m.error
 	timeFooter := m.prListUpdated.Format("03:04:05 PM")
+	if m.interval != 0 {
+		timeFooter += " (🔄" + m.interval.String() + ")"
+	}
 	infoWidth := m.myPRs.Width() - len(timeFooter)
 	footerFormat := fmt.Sprintf("%%-%ds%%s", infoWidth)
 	return fmt.Sprintf(footerFormat, footer, timeFooter)
