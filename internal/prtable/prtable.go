@@ -20,12 +20,12 @@ const (
 	checksColumn columnIndex = iota
 	mergeableColumn
 	approvedColumn
+	draftColumn
 	titleColumn
 	urlColumn
 	authorColumn
 	repositoryColumn
 	changeColumn
-	draftColumn
 	stateColumn
 	commentsColumn
 	updatedAtColumn
@@ -35,18 +35,31 @@ var columns = []table.Column{
 	{Title: "C", Width: 2},
 	{Title: "M", Width: 2},
 	{Title: "A", Width: 2},
+	{Title: "D", Width: 0},
 	{Title: "Title", Width: 5},
 	{Title: "Url", Width: 0},
 	{Title: "Author", Width: 6},
 	{Title: "Repository", Width: 10},
 	{Title: "Change", Width: 6},
-	{Title: "Draft", Width: 0},
 	{Title: "State", Width: 0},
 	{Title: "Comments", Width: 0},
 	{Title: "UpdatedAt", Width: 10},
 }
 
-var defaultColumnWidths = []int{2, 2, 2, 5, 3, 6, 10, 6, 5, 5, 8, 9}
+var defaultColumnWidths = []int{
+	2,  // checks
+	2,  // mergable
+	2,  // approved
+	2,  // draft
+	5,  // title
+	3,  // url
+	6,  // author
+	10, // repository
+	6,  // change
+	5,  // state
+	8,  // comments
+	9,  // updated at
+}
 
 type PRTable struct {
 	table.Model
@@ -220,14 +233,13 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 			checkEmoji(issue.Node.StatusCheckRollup.State),
 			mergeableEmoji(issue.Node.Mergeable, issue.Node.MergeStateStatus),
 			reviewEmoji(issue.Node.ReviewDecision),
+			draftEmoji(issue.Node.IsDraft),
 			issue.Node.Title,
 			issue.Node.URL,
 			issue.Node.Author.Login,
 			t.shortenRepository(issue.Node.Repository.NameWithOwner),
 			fmt.Sprintf("%4s (+%d/-%d)", fmt.Sprintf("%d", issue.Node.ChangedFiles), issue.Node.Additions, issue.Node.Deletions),
-			draftEmoji(issue.Node.IsDraft),
 			stateEmoji(issue.Node.State),
-			fmt.Sprintf("%d", issue.Node.TotalCommentsCount),
 			timeAgo(issue.Node.UpdatedAt),
 		}
 		for i, columnValue := range row {

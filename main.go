@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
-	"github.com/mrxk/gh-my/internal/github"
 	"github.com/mrxk/gh-my/internal/model"
+	"github.com/sassoftware/sas-ggdk/pkg/jsonutils"
 )
 
 const (
@@ -20,17 +21,19 @@ Usage:
 	my [(prs|requests|all)] [options]
 
 Options:
-	-d, --include-drafts               Include draft PRs.
-	-c, --include-closed               Include closed PRs.
-	-w <interval>, --watch=<interval>  Poll every <interval>.
+	-d, --include-drafts               Include draft PRs
+	-c, --include-closed               Include closed PRs
+	-w <interval>, --watch=<interval>  Poll every <interval>
+	-f <path>, --config=<path>         Path to config file [default: ${XDG_CONFIG_HOME}/gh-my/config.json]
 	`
 )
 
 type Options struct {
 	startTab      model.TabIndex
-	includeClosed bool
-	includeDrafts bool
-	interval      time.Duration
+	IncludeClosed bool          `json:"includeClosed,omitempty"`
+	IncludeDrafts bool          `json:"includeDrafts,omitempty"`
+	Interval      time.Duration `json:"interval,omitempty"`
+	Repositories  []string      `json:"repositories,omitempty"`
 }
 
 func parseArgs(usage string) (Options, error) {
@@ -39,15 +42,25 @@ func parseArgs(usage string) (Options, error) {
 	if err != nil {
 		return opts, err
 	}
-	opts.includeDrafts, _ = docOpts.Bool("--include-drafts")
-	opts.includeClosed, _ = docOpts.Bool("--include-closed")
+	path, _ := docOpts.String("--config")
+	if path != "" {
+		opts = loadConfig(path)
+	}
+	includeDrafts, _ := docOpts.Bool("--include-drafts")
+	if includeDrafts {
+		opts.IncludeDrafts = true
+	}
+	includeClosed, _ := docOpts.Bool("--include-closed")
+	if includeClosed {
+		opts.IncludeClosed = true
+	}
 	interval, _ := docOpts.String("--watch")
 	if interval != "" {
 		duration, err := time.ParseDuration(interval)
 		if err != nil {
 			return opts, err
 		}
-		opts.interval = duration
+		opts.Interval = duration
 	}
 	prs, _ := docOpts.Bool("prs")
 	requests, _ := docOpts.Bool("requests")
@@ -63,47 +76,37 @@ func parseArgs(usage string) (Options, error) {
 	return opts, nil
 }
 
+func loadConfig(rawPath string) Options {
+	_, present := os.LookupEnv("XDG_CONFIG_HOME")
+	if !present {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			os.Setenv("XDG_CONFIG_HOME", path.Join(home, ".config"))
+		}
+	}
+	path := os.ExpandEnv(rawPath)
+	optionsResult := jsonutils.LoadAs[Options](path)
+	return optionsResult.MustGet()
+}
+
 func main() {
 	opts, err := parseArgs(myUsage)
 	if err != nil {
 		panic(err)
 	}
-	var ticker *time.Ticker
-	if opts.interval != 0 {
-		ticker = time.NewTicker(opts.interval)
-	}
 	ctx, cancel := context.WithCancel(context.Background())
-	client, err := github.New(&github.Options{
-		Ctx:           ctx,
-		Ticker:        ticker,
-		IncludeDrafts: opts.includeDrafts,
-		IncludeClosed: opts.includeClosed,
-	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		os.Exit(1)
-	}
-	client.Run()
 	p := tea.NewProgram(model.New(model.Options{
 		Context:       ctx,
-		Commands:      client.Commands,
-		IncludeClosed: opts.includeClosed,
-		IncludeDrafts: opts.includeDrafts,
-		Interval:      opts.interval,
+		IncludeClosed: opts.IncludeClosed,
+		IncludeDrafts: opts.IncludeDrafts,
+		Interval:      opts.Interval,
 		StartTab:      opts.startTab,
+		Repositories:  opts.Repositories,
 	}), tea.WithAltScreen())
-	go pump(client, p)
 	_, err = p.Run()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 	cancel()
-}
-
-func pump(client *github.Client, p *tea.Program) {
-	for {
-		response := <-client.Data
-		p.Send(model.SearchResultsMsg{SearchResults: response})
-	}
 }

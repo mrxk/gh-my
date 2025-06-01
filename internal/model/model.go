@@ -14,12 +14,13 @@ import (
 	"github.com/charmbracelet/soft-serve/pkg/ui/components/tabs"
 	"github.com/mrxk/gh-my/internal/github"
 	"github.com/mrxk/gh-my/internal/prtable"
+	"github.com/sassoftware/sas-ggdk/pkg/result"
 )
 
 // Ensure that Model implements tea.Model.
 var _ tea.Model = (*Model)(nil)
 
-// selectedWindowIndex indicates which window has focus.
+// TabIndex indicates which window has focus.
 type TabIndex int
 
 // Possible selected window indexes.
@@ -29,13 +30,16 @@ const (
 	AllPRsTab
 )
 
+// tickMsg is the message returned from a tick
+type tickMsg time.Time
+
 // Update the model with search results
-type SearchResultsMsg struct {
-	SearchResults github.SearchResults
+type searchResultsMsg struct {
+	selectedTab   TabIndex
+	searchResults result.Result[github.PullRequestSearchResults]
 }
 
 type Model struct {
-	commands      chan<- github.Command
 	selectedTab   TabIndex
 	topTabs       *tabs.Tabs
 	myPRs         *prtable.PRTable
@@ -48,20 +52,20 @@ type Model struct {
 	includeDrafts bool
 	prListUpdated time.Time
 	interval      time.Duration
+	repositories  []string
 }
 
 type Options struct {
 	Context       context.Context
-	Commands      chan<- github.Command
 	IncludeClosed bool
 	IncludeDrafts bool
 	StartTab      TabIndex
 	Interval      time.Duration
+	Repositories  []string
 }
 
 func New(opts Options) *Model {
 	m := &Model{}
-	m.commands = opts.Commands
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = false
 	delegate.SetSpacing(0) // compact lists
@@ -73,22 +77,26 @@ func New(opts Options) *Model {
 	m.includeDrafts = opts.IncludeDrafts
 	m.selectedTab = opts.StartTab
 	m.interval = opts.Interval
+	m.repositories = opts.Repositories
 	return m
 }
 
 // Init implements tea.Model.
 func (m *Model) Init() tea.Cmd {
-	var cmd tea.Cmd
+	cmds := []tea.Cmd{tea.SetWindowTitle("Github Pull Requests")}
 	switch m.selectedTab {
 	case MyPRsTab:
-		cmd = m.myPRs.Focus()
+		cmds = append(cmds, m.myPRs.Focus())
 	case MyRequestsTab:
-		cmd = m.myRequests.Focus()
+		cmds = append(cmds, m.myRequests.Focus())
 	case AllPRsTab:
-		cmd = m.allPRs.Focus()
+		cmds = append(cmds, m.allPRs.Focus())
 	}
-	return tea.Batch(tea.SetWindowTitle("Github Pull Requests"), cmd, tabs.SelectTabCmd(int(m.selectedTab)))
-
+	if m.interval != 0 {
+		cmds = append(cmds, doTick(m.interval))
+	}
+	cmds = append(cmds, tabs.SelectTabCmd(int(m.selectedTab)))
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -98,13 +106,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.handleWindowSize(msg)
+	case tickMsg:
+		return m, tea.Batch(m.reload, doTick(m.interval))
 	case tea.KeyMsg:
 		newModel, cmd, handled := m.handleGlobalKey(msg)
 		if handled {
 			return newModel, cmd
 		}
 		cmds = append(cmds, cmd)
-	case SearchResultsMsg:
+	case searchResultsMsg:
 		return m.handleSearchResults(msg)
 	case tabs.ActiveTabMsg:
 		cmd = m.activateTab(TabIndex(msg))
@@ -125,26 +135,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
-}
-
-func (m *Model) activateTab(idx TabIndex) tea.Cmd {
-	var cmd tea.Cmd
-	m.selectedTab = idx
-	switch m.selectedTab {
-	case MyPRsTab:
-		cmd = m.myPRs.Focus()
-		m.myRequests.Blur()
-		m.allPRs.Blur()
-	case MyRequestsTab:
-		m.myPRs.Blur()
-		cmd = m.myRequests.Focus()
-		m.allPRs.Blur()
-	case AllPRsTab:
-		m.myPRs.Blur()
-		m.myRequests.Blur()
-		cmd = m.allPRs.Focus()
-	}
-	return cmd
 }
 
 // View implements tea.Model.
@@ -174,6 +164,26 @@ func (m *Model) View() string {
 				footer,
 			),
 		}, "\n")
+}
+
+func (m *Model) activateTab(idx TabIndex) tea.Cmd {
+	var cmd tea.Cmd
+	m.selectedTab = idx
+	switch m.selectedTab {
+	case MyPRsTab:
+		cmd = m.myPRs.Focus()
+		m.myRequests.Blur()
+		m.allPRs.Blur()
+	case MyRequestsTab:
+		m.myPRs.Blur()
+		cmd = m.myRequests.Focus()
+		m.allPRs.Blur()
+	case AllPRsTab:
+		m.myPRs.Blur()
+		m.myRequests.Blur()
+		cmd = m.allPRs.Focus()
+	}
+	return cmd
 }
 
 func (m *Model) footerView(status string) string {
@@ -229,17 +239,17 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	return m, cmd, handled
 }
 
-func (m *Model) handleSearchResults(msg SearchResultsMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleSearchResults(msg searchResultsMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.prListUpdated = time.Now()
 	m.error = "" // clear any error
-	switch typedResults := msg.SearchResults.(type) {
-	case *github.MyPRs:
-		m.myPRs, cmd = m.myPRs.Update(typedResults.SearchResults)
-	case *github.MyRequets:
-		m.myRequests, cmd = m.myRequests.Update(typedResults.SearchResults)
-	case *github.AllPRs:
-		m.allPRs, cmd = m.allPRs.Update(typedResults.SearchResults)
+	switch msg.selectedTab {
+	case MyPRsTab:
+		m.myPRs, cmd = m.myPRs.Update(msg.searchResults)
+	case MyRequestsTab:
+		m.myRequests, cmd = m.myRequests.Update(msg.searchResults)
+	case AllPRsTab:
+		m.allPRs, cmd = m.allPRs.Update(msg.searchResults)
 	}
 	return m, cmd
 }
@@ -262,29 +272,27 @@ func (m *Model) openSelectedPullRequest() {
 }
 
 func (m *Model) fetchMyPullRequests() tea.Msg {
-	m.commands <- github.FetchMyPRs{}
-	return nil
+	response := github.ExecuteQuery(context.Background(), github.ForMyPRs, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+	return searchResultsMsg{selectedTab: MyPRsTab, searchResults: response}
 }
 
 func (m *Model) fetchMyRequests() tea.Msg {
-	m.commands <- github.FetchMyRequests{}
-	return nil
+	response := github.ExecuteQuery(context.Background(), github.ForMyRequests, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+	return searchResultsMsg{selectedTab: MyRequestsTab, searchResults: response}
 }
 
 func (m *Model) fetchAllPullRequets() tea.Msg {
-	m.commands <- github.FetchAllPRs{}
-	return nil
+	response := github.ExecuteQuery(context.Background(), github.ForRepositories(m.repositories), github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+	return searchResultsMsg{selectedTab: AllPRsTab, searchResults: response}
 }
 
 func (m *Model) toggleDrafts() tea.Msg {
 	m.includeDrafts = !m.includeDrafts
-	m.commands <- github.IncludeDrafts(m.includeDrafts)
 	return nil
 }
 
 func (m *Model) toggleClosed() tea.Msg {
 	m.includeClosed = !m.includeClosed
-	m.commands <- github.IncludeClosed(m.includeClosed)
 	return nil
 }
 
@@ -294,4 +302,10 @@ func (m *Model) reload() tea.Msg {
 		Runes: []rune{'r'},
 	}
 	return tea.KeyMsg(key)
+}
+
+func doTick(interval time.Duration) tea.Cmd {
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }

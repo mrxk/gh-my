@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"strings"
-	"time"
 
-	"github.com/sassoftware/sas-ggdk/pkg/jsonutils"
 	"github.com/sassoftware/sas-ggdk/pkg/result"
 	"github.com/sassoftware/sas-ggdk/pkg/sliceutils"
 )
@@ -74,106 +71,6 @@ type AllPRs struct {
 
 func (*AllPRs) isSearchResults() {}
 
-// Command is a sealed interface that is used to indicate which structs are
-// commands for this github client
-type Command interface {
-	isCommand()
-}
-
-type FetchMyPRs struct{}
-
-func (FetchMyPRs) isCommand() {}
-
-type FetchMyRequests struct{}
-
-func (FetchMyRequests) isCommand() {}
-
-type FetchAllPRs struct{}
-
-func (FetchAllPRs) isCommand() {}
-
-type IncludeDrafts bool
-
-func (IncludeDrafts) isCommand() {}
-
-type IncludeClosed bool
-
-func (IncludeClosed) isCommand() {}
-
-type Client struct {
-	Data     <-chan SearchResults
-	Commands chan<- Command
-
-	data          chan<- SearchResults
-	ctx           context.Context
-	ticker        *time.Ticker
-	commands      <-chan Command
-	includeDrafts bool
-	includeClosed bool
-	repositories  []string
-}
-
-type Options struct {
-	Ctx           context.Context
-	Ticker        *time.Ticker
-	IncludeDrafts bool
-	IncludeClosed bool
-}
-
-func New(config *Options) (*Client, error) {
-	data := make(chan SearchResults)
-	commands := make(chan Command)
-	c := &Client{
-		Data:     data,
-		Commands: commands,
-		data:     data,
-		commands: commands,
-	}
-	// Load defaults from file
-	err := c.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	// Override with explicit args
-	c.ctx = config.Ctx
-	c.ticker = config.Ticker
-	c.includeDrafts = config.IncludeDrafts
-	c.includeClosed = config.IncludeClosed
-	return c, nil
-}
-
-func (c *Client) Run() {
-	go c.run()
-}
-
-func (c *Client) run() {
-	var ticker <-chan time.Time
-	if c.ticker != nil {
-		ticker = c.ticker.C
-	}
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker:
-			c.fetchMyPRs()
-		case cmd := <-c.commands:
-			switch typedCmd := cmd.(type) {
-			case FetchMyPRs:
-				c.fetchMyPRs()
-			case FetchMyRequests:
-				c.fetchMyRequests()
-			case FetchAllPRs:
-				c.fetchAllPRs()
-			case IncludeDrafts:
-				c.includeDrafts = bool(typedCmd)
-			case IncludeClosed:
-				c.includeClosed = bool(typedCmd)
-			}
-		}
-	}
-}
-
 const template = `
 {
   search(query: "%s", type: ISSUE, first: 100) {
@@ -210,34 +107,55 @@ const template = `
 }
 `
 
-func (c *Client) fetchMyPRs() {
-	query := fmt.Sprintf("is:pr author:@me %s %s", c.getIncludeDraftQueryArg(), c.getIncludeClosedQueryArg())
-	myQuery := fmt.Sprintf(template, query)
-	myPrsData := c.executeQuery(myQuery)
-	c.data <- &MyPRs{SearchResults: myPrsData}
-}
+type Option func(string) string
 
-func (c *Client) fetchMyRequests() {
-	query := fmt.Sprintf("is:pr review-requested:@me %s %s", c.getIncludeDraftQueryArg(), c.getIncludeClosedQueryArg())
-	myQuery := fmt.Sprintf(template, query)
-	myPrsData := c.executeQuery(myQuery)
-	c.data <- &MyRequets{SearchResults: myPrsData}
-}
-
-func (c *Client) fetchAllPRs() {
-	if len(c.repositories) == 0 {
-		c.data <- &AllPRs{SearchResults: result.Ok(PullRequestSearchResults{})}
-		return
+func WithDrafts(include bool) func(string) string {
+	return func(query string) string {
+		if include {
+			return query
+		}
+		return query + " draft:false"
 	}
-	query := fmt.Sprintf("is:pr %s %s %s", c.getRepoQueryArg(), c.getIncludeDraftQueryArg(), c.getIncludeClosedQueryArg())
-	myPrsQuery := fmt.Sprintf(template, query)
-	myPrsData := c.executeQuery(myPrsQuery)
-	c.data <- &AllPRs{SearchResults: myPrsData}
 }
 
-func (c *Client) executeQuery(query string) result.Result[PullRequestSearchResults] {
-	cmd := exec.CommandContext(c.ctx, "gh", "api", "graphql", "-f", fmt.Sprintf("query=%s", query))
-	cmd.Env = getGHEnviron()
+func WithClosed(include bool) func(string) string {
+	return func(query string) string {
+		if include {
+			return query
+		}
+		return query + " is:open"
+	}
+}
+
+func ForRepositories(repositories []string) func(string) string {
+	return func(query string) string {
+		repositories = sliceutils.MapNoError(func(r string) string { return "repo:" + r }, repositories)
+		return query + strings.Join(repositories, " ")
+	}
+}
+
+func ForMyPRs(query string) string {
+	if len(query) != 0 {
+		query = query + " "
+	}
+	return query + "is:pr author:@me"
+}
+
+func ForMyRequests(query string) string {
+	if len(query) != 0 {
+		query = query + " "
+	}
+	return query + "is:pr review-requested:@me"
+}
+
+func ExecuteQuery(ctx context.Context, options ...Option) result.Result[PullRequestSearchResults] {
+	query := ""
+	for _, option := range options {
+		query = option(query)
+	}
+	query = fmt.Sprintf(template, query)
+	cmd := exec.CommandContext(ctx, "gh", "api", "graphql", "-f", fmt.Sprintf("query=%s", query))
+	cmd.Env = env
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return result.Error[PullRequestSearchResults](fmt.Errorf("%s: %w", output, err))
@@ -250,69 +168,15 @@ func (c *Client) executeQuery(query string) result.Result[PullRequestSearchResul
 	return result.Ok(response)
 }
 
-func (c *Client) getIncludeDraftQueryArg() string {
-	if !c.includeDrafts {
-		return "draft:false"
-	}
-	return ""
-}
+var env []string
 
-func (c *Client) getIncludeClosedQueryArg() string {
-	if !c.includeClosed {
-		return "is:open"
-	}
-	return ""
-}
-
-func (c *Client) getRepoQueryArg() string {
-	repositories := sliceutils.MapNoError(func(r string) string { return "repo:" + r }, c.repositories)
-	return strings.Join(repositories, " ")
-}
-
-func (c *Client) loadConfig() error {
-	type configuration struct {
-		IncludeClosed bool
-		IncludeDrafts bool
-		Repositories  []string
-	}
-	configPath := getConfigPath()
-	configResult := result.FlatMap(jsonutils.LoadAs[configuration], configPath)
-	if configResult.IsError() {
-		return configResult.Error()
-	}
-	config := configResult.MustGet()
-	c.includeClosed = config.IncludeClosed
-	c.includeDrafts = config.IncludeDrafts
-	c.repositories = config.Repositories
-	return nil
-}
-
-func getConfigPath() result.Result[string] {
-	configRoot, present := os.LookupEnv("XDG_CONFIG_HOME")
-	if present {
-		return result.Ok(configPathFromConfigRoot(configRoot))
-	}
-	homeDir := result.New(os.UserHomeDir())
-	return result.MapNoError(configPathFromHomeDir, homeDir)
-}
-
-func getGHEnviron() []string {
-	env := os.Environ()
+func init() {
+	env = os.Environ()
 	for i := range env {
 		if strings.HasPrefix(env[i], "GH_NO_UPDATE_NOTIFIER=") {
 			env[i] = "GH_NO_UPDATE_NOTIFIER=1"
-			return env
+			return
 		}
 	}
 	env = append(env, "GH_NO_UPDATE_NOTIFIER=1")
-	return env
-}
-
-func configPathFromHomeDir(d string) string {
-	configRoot := path.Join(d, ".config")
-	return configPathFromConfigRoot(configRoot)
-}
-
-func configPathFromConfigRoot(d string) string {
-	return path.Join(d, "gh-my", "config.json")
 }
