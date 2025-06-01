@@ -113,7 +113,7 @@ func New(reloadCommand tea.Cmd) *PRTable {
 		urlWidth:      3,
 		commentsWidth: 8,
 		stateWidth:    5,
-		draftWidth:    5,
+		draftWidth:    2,
 	}
 }
 
@@ -240,6 +240,7 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 			t.shortenRepository(issue.Node.Repository.NameWithOwner),
 			fmt.Sprintf("%4s (+%d/-%d)", fmt.Sprintf("%d", issue.Node.ChangedFiles), issue.Node.Additions, issue.Node.Deletions),
 			stateEmoji(issue.Node.State),
+			fmt.Sprintf("%d", issue.Node.TotalCommentsCount),
 			timeAgo(issue.Node.UpdatedAt),
 		}
 		for i, columnValue := range row {
@@ -256,14 +257,11 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 		case mergeableColumn:
 			fallthrough
 		case approvedColumn:
+			fallthrough
+		case draftColumn:
 			continue
 		case urlColumn:
 			t.urlWidth = columnWidth
-			if !t.wideView {
-				continue
-			}
-		case draftColumn:
-			t.draftWidth = columnWidth
 			if !t.wideView {
 				continue
 			}
