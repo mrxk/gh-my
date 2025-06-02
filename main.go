@@ -86,6 +86,9 @@ func loadConfig(rawPath string) Options {
 	}
 	path := os.ExpandEnv(rawPath)
 	optionsResult := jsonutils.LoadAs[Options](path)
+	if optionsResult.IsError() {
+		return Options{}
+	}
 	return optionsResult.MustGet()
 }
 
