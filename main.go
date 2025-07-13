@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docopt/docopt-go"
 	"github.com/mrxk/gh-my/internal/model"
+	"github.com/mrxk/gh-my/internal/prtable"
 	"github.com/sassoftware/sas-ggdk/pkg/jsonutils"
 )
 
@@ -30,10 +31,12 @@ Options:
 
 type Options struct {
 	startTab      model.TabIndex
-	IncludeClosed bool          `json:"includeClosed,omitempty"`
-	IncludeDrafts bool          `json:"includeDrafts,omitempty"`
-	Interval      time.Duration `json:"interval,omitempty"`
-	Repositories  []string      `json:"repositories,omitempty"`
+	IncludeClosed bool             `json:"includeClosed,omitempty"`
+	IncludeDrafts bool             `json:"includeDrafts,omitempty"`
+	Interval      time.Duration    `json:"interval,omitempty"`
+	Repositories  []string         `json:"repositories,omitempty"`
+	DefaultView   []prtable.Column `json:"defaultView,omitempty"`
+	WideView      []prtable.Column `json:"wideView,omitempty"`
 }
 
 func parseArgs(usage string) (Options, error) {
@@ -87,6 +90,8 @@ func loadConfig(rawPath string) Options {
 	path := os.ExpandEnv(rawPath)
 	optionsResult := jsonutils.LoadAs[Options](path)
 	if optionsResult.IsError() {
+		fmt.Printf("ERROR: failed to load options: %s\n", optionsResult.Error().Error())
+		os.Exit(2)
 		return Options{}
 	}
 	return optionsResult.MustGet()
@@ -105,6 +110,8 @@ func main() {
 		Interval:      opts.Interval,
 		StartTab:      opts.startTab,
 		Repositories:  opts.Repositories,
+		DefaultView:   opts.DefaultView,
+		WideView:      opts.WideView,
 	}), tea.WithAltScreen())
 	_, err = p.Run()
 	if err != nil {

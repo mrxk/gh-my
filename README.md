@@ -73,6 +73,26 @@ optional).
 * `includeDrafts`: Bool. When true, draft PRs are included by default.
 * `repositories`: String array. The listed repositories will be queried for the
   `all` view.
+* `defaultView`: String array. The listed columns will be included in the
+  default view. Default [ "checks", "mergeable", "approved", "title", "author",
+  "repository", "change", "updatedAt" ].
+* `wideView`: String array. The listed columns will be included in the wide
+  view. Default [ "checks", "mergeable", "approved", "draft", "title", "url",
+  "author", "repository", "change", "state", "comments", "updatedAt" ].
+
+Valid view columns include the following:
+* approved
+* author
+* change
+* checks
+* comments
+* draft
+* mergable
+* repository
+* state
+* title
+* updatedAt
+* url
 
 ### Example
 
@@ -84,7 +104,8 @@ optional).
         "org1/repo1",
         "org1/repo2",
         "org2/repo1"
-    ]
+    ],
+    "defaultView": [ "checks", "mergeable", "approved", "title", "repository" ]
 }
 ```
 

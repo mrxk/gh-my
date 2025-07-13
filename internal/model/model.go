@@ -62,6 +62,8 @@ type Options struct {
 	StartTab      TabIndex
 	Interval      time.Duration
 	Repositories  []string
+	DefaultView   []prtable.Column
+	WideView      []prtable.Column
 }
 
 func New(opts Options) *Model {
@@ -70,9 +72,9 @@ func New(opts Options) *Model {
 	delegate.ShowDescription = false
 	delegate.SetSpacing(0) // compact lists
 	m.topTabs = tabs.New(common.NewCommon(opts.Context, lipgloss.DefaultRenderer(), 0, 0), []string{"My PRs", "My Requests", "All PRs"})
-	m.myPRs = prtable.New(m.fetchMyPullRequests)
-	m.myRequests = prtable.New(m.fetchMyRequests)
-	m.allPRs = prtable.New(m.fetchAllPullRequets)
+	m.myPRs = prtable.New(m.fetchMyPullRequests, opts.DefaultView, opts.WideView)
+	m.myRequests = prtable.New(m.fetchMyRequests, opts.DefaultView, opts.WideView)
+	m.allPRs = prtable.New(m.fetchAllPullRequets, opts.DefaultView, opts.WideView)
 	m.includeClosed = opts.IncludeClosed
 	m.includeDrafts = opts.IncludeDrafts
 	m.selectedTab = opts.StartTab
@@ -263,6 +265,9 @@ func (m *Model) openSelectedPullRequest() {
 		url = m.myRequests.GetSelectedPRURL()
 	case AllPRsTab:
 		url = m.allPRs.GetSelectedPRURL()
+	}
+	if url == "" {
+		return
 	}
 	cmd := exec.Command("open", url)
 	err := cmd.Start()

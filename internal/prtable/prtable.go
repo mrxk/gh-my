@@ -13,66 +13,17 @@ import (
 	"github.com/sassoftware/sas-ggdk/pkg/result"
 )
 
-// columnIndex identifies colums in the output table
-type columnIndex int
-
-const (
-	checksColumn columnIndex = iota
-	mergeableColumn
-	approvedColumn
-	draftColumn
-	titleColumn
-	urlColumn
-	authorColumn
-	repositoryColumn
-	changeColumn
-	stateColumn
-	commentsColumn
-	updatedAtColumn
-)
-
-var columns = []table.Column{
-	{Title: "C", Width: 2},
-	{Title: "M", Width: 2},
-	{Title: "A", Width: 2},
-	{Title: "D", Width: 0},
-	{Title: "Title", Width: 5},
-	{Title: "Url", Width: 0},
-	{Title: "Author", Width: 6},
-	{Title: "Repository", Width: 10},
-	{Title: "Change", Width: 6},
-	{Title: "State", Width: 0},
-	{Title: "Comments", Width: 0},
-	{Title: "UpdatedAt", Width: 10},
-}
-
-var defaultColumnWidths = []int{
-	2,  // checks
-	2,  // mergable
-	2,  // approved
-	2,  // draft
-	5,  // title
-	3,  // url
-	6,  // author
-	10, // repository
-	6,  // change
-	5,  // state
-	8,  // comments
-	9,  // updated at
-}
-
 type PRTable struct {
 	table.Model
-	prs           github.PullRequestSearchResults
-	reloadCommand tea.Cmd
-	needReload    bool
-	loading       bool
-	wideView      bool
-	urlWidth      int
-	draftWidth    int
-	stateWidth    int
-	commentsWidth int
-	err           error
+	reloadCommand  tea.Cmd
+	needReload     bool
+	loading        bool
+	wideView       bool
+	err            error
+	defaultColumns []Column
+	wideColumns    []Column
+	currentResults *page
+	urls           []string
 }
 
 var keyMap = table.KeyMap{
@@ -102,18 +53,23 @@ var keyMap = table.KeyMap{
 	),
 }
 
-func New(reloadCommand tea.Cmd) *PRTable {
+func New(reloadCommand tea.Cmd, defaultColumns []Column, wideColumns []Column) *PRTable {
+	if len(defaultColumns) == 0 {
+		defaultColumns = defaultDefaultColumns
+	}
+	if len(wideColumns) == 0 {
+		wideColumns = defaultWideColumns
+	}
 	return &PRTable{
 		Model: table.New(
 			table.WithKeyMap(keyMap),
-			table.WithColumns(duplicate(columns)),
+			table.WithColumns(asTableColumns(defaultColumns)),
 		),
-		needReload:    true,
-		reloadCommand: reloadCommand,
-		urlWidth:      3,
-		commentsWidth: 8,
-		stateWidth:    5,
-		draftWidth:    2,
+		needReload:     true,
+		reloadCommand:  reloadCommand,
+		defaultColumns: defaultColumns,
+		wideColumns:    wideColumns,
+		urls:           []string{},
 	}
 }
 
@@ -200,21 +156,7 @@ func (t *PRTable) Focus() tea.Cmd {
 
 func (t *PRTable) toggleWideView() {
 	t.wideView = !t.wideView
-	cols := t.Model.Columns()
-	if len(cols) == 0 {
-		return
-	}
-	if t.wideView {
-		t.Model.Columns()[urlColumn].Width = t.urlWidth
-		t.Model.Columns()[draftColumn].Width = t.draftWidth
-		t.Model.Columns()[stateColumn].Width = t.stateWidth
-		t.Model.Columns()[commentsColumn].Width = t.commentsWidth
-	} else {
-		t.Model.Columns()[urlColumn].Width = 0
-		t.Model.Columns()[draftColumn].Width = 0
-		t.Model.Columns()[stateColumn].Width = 0
-		t.Model.Columns()[commentsColumn].Width = 0
-	}
+	t.updateModel(t.currentResults)
 	t.Model.UpdateViewport()
 }
 
@@ -225,65 +167,100 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 		t.err = searchResults.Error()
 		return
 	}
-	columnWidths := duplicate(defaultColumnWidths)
-	t.prs = searchResults.MustGet()
-	rows := make([]table.Row, 0, t.prs.Data.Search.IssueCount)
-	for _, issue := range t.prs.Data.Search.Edges {
-		row := []string{
-			checkEmoji(issue.Node.StatusCheckRollup.State),
-			mergeableEmoji(issue.Node.Mergeable, issue.Node.MergeStateStatus),
-			reviewEmoji(issue.Node.ReviewDecision),
-			draftEmoji(issue.Node.IsDraft),
-			issue.Node.Title,
-			issue.Node.URL,
-			issue.Node.Author.Login,
-			t.shortenRepository(issue.Node.Repository.NameWithOwner),
-			fmt.Sprintf("%4s (+%d/-%d)", fmt.Sprintf("%d", issue.Node.ChangedFiles), issue.Node.Additions, issue.Node.Deletions),
-			stateEmoji(issue.Node.State),
-			fmt.Sprintf("%d", issue.Node.TotalCommentsCount),
-			timeAgo(issue.Node.UpdatedAt),
+	page := result.MapNoError(asPage, searchResults)
+	page = result.MapNoError(t.updateModel, page)
+	t.currentResults = page.MustGet()
+}
+
+type page struct {
+	columnWidths map[Column]int
+	rows         []map[Column]string
+}
+
+func asPage(prs github.PullRequestSearchResults) *page {
+	p := &page{
+		columnWidths: map[Column]int{},
+		rows:         []map[Column]string{},
+	}
+	for _, issue := range prs.Data.Search.Edges {
+		row := map[Column]string{
+			checksColumn:     checkEmoji(issue.Node.StatusCheckRollup.State),
+			mergeableColumn:  mergeableEmoji(issue.Node.Mergeable, issue.Node.MergeStateStatus),
+			approvedColumn:   reviewEmoji(issue.Node.ReviewDecision),
+			draftColumn:      draftEmoji(issue.Node.IsDraft),
+			titleColumn:      issue.Node.Title,
+			urlColumn:        issue.Node.URL,
+			authorColumn:     issue.Node.Author.Login,
+			repositoryColumn: shortenRepository(issue.Node.Repository.NameWithOwner),
+			changeColumn:     fmt.Sprintf("%4s (+%d/-%d)", fmt.Sprintf("%d", issue.Node.ChangedFiles), issue.Node.Additions, issue.Node.Deletions),
+			stateColumn:      stateEmoji(issue.Node.State),
+			commentsColumn:   fmt.Sprintf("%d", issue.Node.TotalCommentsCount),
+			updatedAtColumn:  timeAgo(issue.Node.UpdatedAt),
 		}
-		for i, columnValue := range row {
-			columnWidths[i] = max(columnWidths[i], len(columnValue))
+		for columnIndex, columnValue := range row {
+			p.columnWidths[columnIndex] = max(p.columnWidths[columnIndex], len(columnValue))
+		}
+		p.rows = append(p.rows, row)
+	}
+	return p
+}
+
+func (t *PRTable) updateModel(prs *page) *page {
+	t.Model.SetRows(nil)
+	t.setColumns(prs)
+	t.setRows(prs)
+	return prs
+}
+
+func (t *PRTable) setRows(prs *page) *page {
+	if prs == nil {
+		return prs
+	}
+	selectedColumns := t.defaultColumns
+	if t.wideView {
+		selectedColumns = t.wideColumns
+	}
+	t.urls = make([]string, 0, len(prs.rows))
+	rows := make([]table.Row, 0, len(prs.rows))
+	for _, inputRow := range prs.rows {
+		t.urls = append(t.urls, inputRow[urlColumn])
+		row := make([]string, 0, len(selectedColumns))
+		for _, col := range selectedColumns {
+			row = append(row, inputRow[col])
 		}
 		rows = append(rows, row)
 	}
 	t.Model.SetRows(rows)
-	cols := t.Model.Columns()
-	for i, columnWidth := range columnWidths {
-		switch columnIndex(i) {
-		case checksColumn:
-			fallthrough
-		case mergeableColumn:
-			fallthrough
-		case approvedColumn:
-			fallthrough
-		case draftColumn:
-			continue
-		case urlColumn:
-			t.urlWidth = columnWidth
-			if !t.wideView {
-				continue
-			}
-		case stateColumn:
-			t.stateWidth = columnWidth
-			if !t.wideView {
-				continue
-			}
-		case commentsColumn:
-			t.commentsWidth = columnWidth
-			if !t.wideView {
-				continue
-			}
-		}
-		cols[i].Width = columnWidth
+	return prs
+}
+
+func (t *PRTable) setColumns(prs *page) *page {
+	if prs == nil {
+		return prs
 	}
-	t.Model.SetColumns(cols)
+	selectedColumns := t.defaultColumns
+	if t.wideView {
+		selectedColumns = t.wideColumns
+	}
+	columns := make([]table.Column, 0, len(selectedColumns))
+	for _, col := range selectedColumns {
+		width := min(columnIndex_maxWidth[col], prs.columnWidths[col])
+		width = max(columnIndex_minWidth[col], width)
+		columns = append(columns, table.Column{
+			Title: columnIndex_title[col],
+			Width: width,
+		})
+	}
+	t.Model.SetColumns(columns)
+	return prs
 }
 
 func (t *PRTable) GetSelectedPRURL() string {
-	row := t.SelectedRow()
-	return row[urlColumn]
+	row := t.Cursor()
+	if row >= 0 && row < len(t.urls) {
+		return t.urls[row]
+	}
+	return ""
 }
 
 func checkEmoji(value string) string {
@@ -341,7 +318,7 @@ func stateEmoji(value string) string {
 	}
 }
 
-func (t *PRTable) shortenRepository(value string) string {
+func shortenRepository(value string) string {
 	parts := strings.Split(value, "/")
 	if len(parts) == 1 {
 		return parts[0]
@@ -376,8 +353,15 @@ func timeAgo(timeSpec string) string {
 	return text.Pluralize(int(ago.Hours()/24/365), "year") + " ago"
 }
 
-func duplicate[T any](src []T) []T {
-	dst := make([]T, len(src))
-	copy(dst, src)
+func asTableColumns(src []Column) []table.Column {
+	dst := make([]table.Column, 0, len(src))
+	for _, col := range src {
+		title := columnIndex_title[col]
+		width := columnIndex_minWidth[col]
+		dst = append(dst, table.Column{
+			Title: title,
+			Width: width,
+		})
+	}
 	return dst
 }
