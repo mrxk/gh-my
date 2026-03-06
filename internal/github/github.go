@@ -129,6 +129,9 @@ func WithClosed(include bool) func(string) string {
 
 func ForRepositories(repositories []string) func(string) string {
 	return func(query string) string {
+		if len(query) != 0 {
+			query = query + " "
+		}
 		repositories = sliceutils.MapNoError(func(r string) string { return "repo:" + r }, repositories)
 		return query + strings.Join(repositories, " ")
 	}

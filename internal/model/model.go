@@ -40,30 +40,32 @@ type searchResultsMsg struct {
 }
 
 type Model struct {
-	selectedTab   TabIndex
-	topTabs       *tabs.Tabs
-	myPRs         *prtable.PRTable
-	myRequests    *prtable.PRTable
-	allPRs        *prtable.PRTable
-	height        int
-	width         int
-	error         string
-	includeClosed bool
-	includeDrafts bool
-	prListUpdated time.Time
-	interval      time.Duration
-	repositories  []string
+	selectedTab         TabIndex
+	topTabs             *tabs.Tabs
+	myPRs               *prtable.PRTable
+	myRequests          *prtable.PRTable
+	allPRs              *prtable.PRTable
+	height              int
+	width               int
+	error               string
+	individualRepoQuery bool
+	includeClosed       bool
+	includeDrafts       bool
+	prListUpdated       time.Time
+	interval            time.Duration
+	repositories        []string
 }
 
 type Options struct {
-	Context       context.Context
-	IncludeClosed bool
-	IncludeDrafts bool
-	StartTab      TabIndex
-	Interval      time.Duration
-	Repositories  []string
-	DefaultView   []prtable.Column
-	WideView      []prtable.Column
+	Context             context.Context
+	IndividualRepoQuery bool
+	IncludeClosed       bool
+	IncludeDrafts       bool
+	StartTab            TabIndex
+	Interval            time.Duration
+	Repositories        []string
+	DefaultView         []prtable.Column
+	WideView            []prtable.Column
 }
 
 func New(opts Options) *Model {
@@ -75,6 +77,7 @@ func New(opts Options) *Model {
 	m.myPRs = prtable.New(m.fetchMyPullRequests, opts.DefaultView, opts.WideView)
 	m.myRequests = prtable.New(m.fetchMyRequests, opts.DefaultView, opts.WideView)
 	m.allPRs = prtable.New(m.fetchAllPullRequets, opts.DefaultView, opts.WideView)
+	m.individualRepoQuery = opts.IndividualRepoQuery
 	m.includeClosed = opts.IncludeClosed
 	m.includeDrafts = opts.IncludeDrafts
 	m.selectedTab = opts.StartTab
@@ -190,6 +193,9 @@ func (m *Model) activateTab(idx TabIndex) tea.Cmd {
 
 func (m *Model) footerView(status string) string {
 	footer := status
+	if m.individualRepoQuery {
+		footer += " [individual repo queries]"
+	}
 	if m.includeClosed {
 		footer += " [including closed]"
 	}
@@ -237,6 +243,9 @@ func (m *Model) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	case "c":
 		cmd = tea.Batch(m.toggleClosed, m.reload)
 		handled = false // let the other components see this message
+	case "i":
+		cmd = tea.Batch(m.toggleIndividualRepoQuery, m.reload)
+		handled = false // let the other components see this message
 	}
 	return m, cmd, handled
 }
@@ -277,18 +286,68 @@ func (m *Model) openSelectedPullRequest() {
 }
 
 func (m *Model) fetchMyPullRequests() tea.Msg {
-	response := github.ExecuteQuery(context.Background(), github.ForMyPRs, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
-	return searchResultsMsg{selectedTab: MyPRsTab, searchResults: response}
+	if m.individualRepoQuery {
+		results := result.Ok(github.PullRequestSearchResults{})
+		for _, repo := range m.repositories {
+			response := github.ExecuteQuery(
+				context.Background(),
+				github.ForMyPRs,
+				github.ForRepositories([]string{repo}),
+				github.WithClosed(m.includeClosed),
+				github.WithDrafts(m.includeDrafts),
+			)
+			results = result.MapNoError2(mergeResults, results, response)
+		}
+		return searchResultsMsg{selectedTab: MyPRsTab, searchResults: results}
+	} else {
+		response := github.ExecuteQuery(context.Background(), github.ForMyPRs, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+		return searchResultsMsg{selectedTab: MyPRsTab, searchResults: response}
+	}
 }
 
 func (m *Model) fetchMyRequests() tea.Msg {
-	response := github.ExecuteQuery(context.Background(), github.ForMyRequests, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
-	return searchResultsMsg{selectedTab: MyRequestsTab, searchResults: response}
+	if m.individualRepoQuery {
+		results := result.Ok(github.PullRequestSearchResults{})
+		for _, repo := range m.repositories {
+			response := github.ExecuteQuery(
+				context.Background(),
+				github.ForMyRequests,
+				github.ForRepositories([]string{repo}),
+				github.WithClosed(m.includeClosed),
+				github.WithDrafts(m.includeDrafts),
+			)
+			results = result.MapNoError2(mergeResults, results, response)
+		}
+		return searchResultsMsg{selectedTab: MyRequestsTab, searchResults: results}
+	} else {
+		response := github.ExecuteQuery(context.Background(), github.ForMyRequests, github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+		return searchResultsMsg{selectedTab: MyRequestsTab, searchResults: response}
+	}
 }
 
 func (m *Model) fetchAllPullRequets() tea.Msg {
-	response := github.ExecuteQuery(context.Background(), github.ForRepositories(m.repositories), github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
-	return searchResultsMsg{selectedTab: AllPRsTab, searchResults: response}
+	if m.individualRepoQuery {
+		results := result.Ok(github.PullRequestSearchResults{})
+		for _, repo := range m.repositories {
+			response := github.ExecuteQuery(
+				context.Background(),
+				github.ForRepositories([]string{repo}),
+				github.WithClosed(m.includeClosed),
+				github.WithDrafts(m.includeDrafts),
+			)
+			results = result.MapNoError2(mergeResults, results, response)
+		}
+		return searchResultsMsg{selectedTab: AllPRsTab, searchResults: results}
+	} else {
+		response := github.ExecuteQuery(context.Background(), github.ForRepositories(m.repositories), github.WithClosed(m.includeClosed), github.WithDrafts(m.includeDrafts))
+		return searchResultsMsg{selectedTab: AllPRsTab, searchResults: response}
+	}
+}
+
+func mergeResults(acc github.PullRequestSearchResults, newResults github.PullRequestSearchResults) github.PullRequestSearchResults {
+	acc.Data.Search.Edges = append(acc.Data.Search.Edges, newResults.Data.Search.Edges...)
+	acc.Data.Search.IssueCount = len(acc.Data.Search.Edges)
+	return acc
 }
 
 func (m *Model) toggleDrafts() tea.Msg {
@@ -298,6 +357,11 @@ func (m *Model) toggleDrafts() tea.Msg {
 
 func (m *Model) toggleClosed() tea.Msg {
 	m.includeClosed = !m.includeClosed
+	return nil
+}
+
+func (m *Model) toggleIndividualRepoQuery() tea.Msg {
+	m.individualRepoQuery = !m.individualRepoQuery
 	return nil
 }
 

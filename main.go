@@ -30,13 +30,14 @@ Options:
 )
 
 type Options struct {
-	startTab      model.TabIndex
-	IncludeClosed bool             `json:"includeClosed,omitempty"`
-	IncludeDrafts bool             `json:"includeDrafts,omitempty"`
-	Interval      time.Duration    `json:"interval,omitempty"`
-	Repositories  []string         `json:"repositories,omitempty"`
-	DefaultView   []prtable.Column `json:"defaultView,omitempty"`
-	WideView      []prtable.Column `json:"wideView,omitempty"`
+	startTab            model.TabIndex
+	IndividualRepoQuery bool             `json:"individualRepoQuery,omitempty"`
+	IncludeClosed       bool             `json:"includeClosed,omitempty"`
+	IncludeDrafts       bool             `json:"includeDrafts,omitempty"`
+	Interval            time.Duration    `json:"interval,omitempty"`
+	Repositories        []string         `json:"repositories,omitempty"`
+	DefaultView         []prtable.Column `json:"defaultView,omitempty"`
+	WideView            []prtable.Column `json:"wideView,omitempty"`
 }
 
 func parseArgs(usage string) (Options, error) {
@@ -56,6 +57,10 @@ func parseArgs(usage string) (Options, error) {
 	includeClosed, _ := docOpts.Bool("--include-closed")
 	if includeClosed {
 		opts.IncludeClosed = true
+	}
+	individualRepoQuery, _ := docOpts.Bool("--individual-repo-query")
+	if individualRepoQuery {
+		opts.IndividualRepoQuery = true
 	}
 	interval, _ := docOpts.String("--watch")
 	if interval != "" {
@@ -104,14 +109,15 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p := tea.NewProgram(model.New(model.Options{
-		Context:       ctx,
-		IncludeClosed: opts.IncludeClosed,
-		IncludeDrafts: opts.IncludeDrafts,
-		Interval:      opts.Interval,
-		StartTab:      opts.startTab,
-		Repositories:  opts.Repositories,
-		DefaultView:   opts.DefaultView,
-		WideView:      opts.WideView,
+		Context:             ctx,
+		IndividualRepoQuery: opts.IndividualRepoQuery,
+		IncludeClosed:       opts.IncludeClosed,
+		IncludeDrafts:       opts.IncludeDrafts,
+		Interval:            opts.Interval,
+		StartTab:            opts.startTab,
+		Repositories:        opts.Repositories,
+		DefaultView:         opts.DefaultView,
+		WideView:            opts.WideView,
 	}), tea.WithAltScreen())
 	_, err = p.Run()
 	if err != nil {
