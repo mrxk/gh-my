@@ -166,6 +166,8 @@ func (t *PRTable) handleSearchResults(searchResults result.Result[github.PullReq
 	if searchResults.IsError() {
 		t.err = searchResults.Error()
 		return
+	} else {
+		t.err = nil
 	}
 	page := result.MapNoError(asPage, searchResults)
 	page = result.MapNoError(t.updateModel, page)
